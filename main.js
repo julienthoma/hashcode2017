@@ -9,16 +9,26 @@ const Cache = require('./Cache');
 const endpointmap = {};
 const videomap = {};
 const cacheMap = {};
+const videoEndpointMap = {};
 
 const run = (fileName) => {
   const data = parseFile(`./${fileName}.in`);
 
   const videoSizes = {};
   let videoSizeSum = 0;
-  const endpoints = data.endpoints.map((endpoint, index) => new Endpoint(index, endpoint));
+  const endpoints = [];
+  data.endpoints.forEach((_endpoint, index) => {
+    const endpoint = new Endpoint(index, _endpoint)
 
+    if (endpoint.caches.length !== 0) {
+      endpoints.push(endpoint);
+    }
+  });
 
-  endpoints.forEach(_endpoint => endpointmap[_endpoint.id] = _endpoint);
+  endpoints.forEach(_endpoint => {
+    videoEndpointMap[_endpoint.id] = {};
+    endpointmap[_endpoint.id] = _endpoint
+  });
   const videos = data.videoSizes
     .map((video, index) => new Video(index, video));
 
@@ -28,14 +38,44 @@ const run = (fileName) => {
     videomap[_video.id] = _video
   });
 
-  const videoAvgSize = videoSizeSum / videos.length;
-
-  const requests = data.requests.map(request => new Request(request));
-
-
   for (var i = 0; i < data.cacheCount; i++) {
     cacheMap[i] = new Cache(i, data.cacheCapacity);
   }
+
+  const requests = [];
+
+  data.requests.forEach(_request => {
+    const videoId = _request[0];
+    const endpointId = _request[1];
+    const count = parseInt(_request[2], 10);
+
+    if (!videoEndpointMap[endpointId]) {
+      return;
+    }
+
+    if (!videoEndpointMap[endpointId][videoId]) {
+      const request = new Request(_request);
+      videoEndpointMap[endpointId][videoId] = request;
+      requests.push(request);
+    } else {
+      videoEndpointMap[endpointId][videoId].count += count;
+    }
+  });
+
+  requests.forEach(request => {
+    const video = videomap[request.videoId];
+    const endpoint = endpointmap[request.endpointId];
+
+    endpoint.caches.forEach(_cache => {
+      const cache = cacheMap[_cache.id];
+
+      cache.addPossibleVideo(video, request.count, _cache.latency, endpoint.dataCenterLatency);
+    });
+  });
+
+  const bestGains = getBestGains(requests).sort((a, b) => b.gain - a.gain);
+
+  parseGains(bestGains);
 
   requests.sort((a, b) => {
     return calcRequestImportance(b) - calcRequestImportance(a);
@@ -44,31 +84,30 @@ const run = (fileName) => {
   parseRequests(requests);
   parseRequests(requests, true);
 
-  console.log('done');
-
   writeOutput(cacheMap, `./${fileName}.out`);
 };
 
 
 const testmap = {};
 
+function parseGains(gains) {
+  gains.forEach(gain => {
+    const cache = gain.cache;
+    const video = gain.video;
+
+    if (!cache.videoExists(video.id) && cache.canAdd(video)) {
+      cache.add(video);
+    }
+  });
+}
+
+
 function parseRequests(requests, ignoreDuplicates = false) {
   requests.forEach(request => {
-
-    //if (!testmap[request.endpointId]) {
-    //  testmap[request.endpointId] = {}
-    //}
-    //
-    //if (!testmap[request.endpointId][request.videoId]) {
-    //  testmap[request.endpointId][request.videoId] = 0;
-    //}
-    //
-    //testmap[request.endpointId][request.videoId]++;
-
     const endpoint = endpointmap[request.endpointId];
     const video = videomap[request.videoId];
 
-    if (videoAlreadyExistsInEndpointCaches(endpoint, video) && !ignoreDuplicates) {
+    if (videoAlreadyExistsInEndpointCaches(endpoint, video.id) && !ignoreDuplicates) {
       return;
     }
 
@@ -82,13 +121,53 @@ function parseRequests(requests, ignoreDuplicates = false) {
   });
 }
 
-function videoAlreadyExistsInEndpointCaches(endpoint, video) {
+function getBestGains(requests, ignoreDoubleEnpointGroup = false) {
+  const gains = [];
+
+  requests.forEach(request => {
+    const endpoint = endpointmap[request.endpointId];
+    const video = videomap[request.videoId];
+
+    if (videoAlreadyExistsInEndpointCaches(endpoint, video.id) && !ignoreDoubleEnpointGroup) {
+      return;
+    }
+
+    let bestGain = 0;
+    let bestCache = null;
+
+    endpoint.caches.forEach(_cache => {
+      const cache = cacheMap[_cache.id];
+      const gain = cache.getGainByVideo(video.id);
+
+      //console.log(gain);
+
+      if (gain >= bestGain) {
+        bestCache = cache;
+        bestGain = gain;
+      }
+    });
+
+    if (!bestCache) {
+      //console.log(endpoint.caches);
+    }
+
+    gains.push({
+      video,
+      cache: bestCache,
+      gain: bestGain
+    });
+  });
+
+  return gains;
+}
+
+function videoAlreadyExistsInEndpointCaches(endpoint, videoId) {
   let videoExists = false;
 
   endpoint.caches.forEach(_cache => {
     const cache = cacheMap[_cache.id];
 
-    if (cache.videoExists(video)) {
+    if (cache.videoExists(videoId)) {
       videoExists = true;
     }
   });
@@ -110,7 +189,7 @@ function findBestCache(endpoint, video) {
     }
 
     const fillLevel = cache.currentCapacity / cache.capacity;
-    const score = _cache.latency;
+    const score = _cache.latency / fillLevel;
 
     if (score < lowestScore) {
       lowestScore = score;
@@ -130,7 +209,7 @@ function calcRequestImportance(request) {
   return (count * dataCenterLatency) / video.size;
 }
 
-run('me_at_the_zoo');
-run('videos_worth_spreading');
-//run('kittens');
-run('trending_today');
+//run('me_at_the_zoo');
+//run('videos_worth_spreading');
+run('kittens');
+//run('trending_today');

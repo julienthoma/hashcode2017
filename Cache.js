@@ -3,11 +3,12 @@ module.exports = class Cache {
     this.id = id;
     this.capacity = capacity;
     this.currentCapacity = 0;
-    this.videos = {}
+    this.videos = {};
+    this.possibleVideos = {};
   }
 
-  videoExists(video) {
-    return this.videos[video.id];
+  videoExists(id) {
+    return this.videos[id];
   }
 
   canAdd(video) {
@@ -22,5 +23,20 @@ module.exports = class Cache {
     if (this.currentCapacity > this.capacity) {
       throw new Error('Cache max capacity exceeded');
     }
+  }
+
+  addPossibleVideo(video, count, latency, dataCenterLatency) {
+    if (!this.possibleVideos[video.id]) {
+      this.possibleVideos[video.id] = {
+        size: video.size,
+        gain: 0
+      };
+    }
+
+    this.possibleVideos[video.id].gain += (dataCenterLatency - latency) * count;
+  }
+
+  getGainByVideo(id) {
+    return this.possibleVideos[id].gain / this.possibleVideos[id].size;
   }
 }
