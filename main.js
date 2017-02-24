@@ -34,7 +34,7 @@ const run = (fileName) => {
 
 
   for (var i = 0; i < data.cacheCount; i++) {
-    cacheMap[i] =new Cache(i, data.cacheCapacity);
+    cacheMap[i] = new Cache(i, data.cacheCapacity);
   }
 
   requests.sort((a, b) => {
@@ -42,7 +42,7 @@ const run = (fileName) => {
   });
 
   parseRequests(requests);
-  parseRequests(requests);
+  parseRequests(requests, true);
 
   console.log('done');
 
@@ -50,11 +50,29 @@ const run = (fileName) => {
 };
 
 
-function parseRequests(requests) {
+const testmap = {};
+
+function parseRequests(requests, ignoreDuplicates = false) {
   requests.forEach(request => {
+
+    //if (!testmap[request.endpointId]) {
+    //  testmap[request.endpointId] = {}
+    //}
+    //
+    //if (!testmap[request.endpointId][request.videoId]) {
+    //  testmap[request.endpointId][request.videoId] = 0;
+    //}
+    //
+    //testmap[request.endpointId][request.videoId]++;
+
     const endpoint = endpointmap[request.endpointId];
     const video = videomap[request.videoId];
-    const cache = findBestCache(endpoint, request, video);
+
+    if (videoAlreadyExistsInEndpointCaches(endpoint, video) && !ignoreDuplicates) {
+      return;
+    }
+
+    const cache = findBestCache(endpoint, video);
 
     if (!cache) {
       return;
@@ -64,7 +82,21 @@ function parseRequests(requests) {
   });
 }
 
-function findBestCache(endpoint, request, video) {
+function videoAlreadyExistsInEndpointCaches(endpoint, video) {
+  let videoExists = false;
+
+  endpoint.caches.forEach(_cache => {
+    const cache = cacheMap[_cache.id];
+
+    if (cache.videoExists(video)) {
+      videoExists = true;
+    }
+  });
+
+  return videoExists;
+}
+
+function findBestCache(endpoint, video) {
   let bestCache = null;
   let lowestScore = 999999999999;
 
@@ -72,11 +104,8 @@ function findBestCache(endpoint, request, video) {
     const _cache = endpoint.caches[i];
     const cache = cacheMap[_cache.id];
 
-    if (cache.videoExists(video)) {
-      break;
-    }
 
-    if (!cache.canAdd(video)) {
+    if (!cache.canAdd(video) || cache.videoExists(video)) {
       continue;
     }
 
@@ -84,6 +113,7 @@ function findBestCache(endpoint, request, video) {
     const score = _cache.latency;
 
     if (score < lowestScore) {
+      lowestScore = score;
       bestCache = cache;
     }
   }
@@ -101,6 +131,6 @@ function calcRequestImportance(request) {
 }
 
 run('me_at_the_zoo');
-//run('videos_worth_spreading');
-run('kittens');
-//run('trending_today');
+run('videos_worth_spreading');
+//run('kittens');
+run('trending_today');
